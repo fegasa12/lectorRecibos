@@ -27,7 +27,7 @@ def parse_cfe_text(text: str) -> dict:
         "consumo_kwh": None
     }
 
-    # 1. Número de servicio (RPU - 12 dígitos)
+    # 1. No. de servicio (RPU - 12 dígitos)
     service_match = re.search(r'\b\d{12}\b', text)
     if service_match:
         data["numero_servicio"] = service_match.group(0)
@@ -54,29 +54,36 @@ def parse_cfe_text(text: str) -> dict:
     if period_match:
         data["periodo_facturado"] = period_match.group(1).strip()
 
-    # 6. Consumo kWh - Extracción estricta por renglón sin sangrado multilínea
-    base_match = re.search(r'\bkWh\s+base\b[^\d\n]*([\d,]+)', text, re.IGNORECASE)
-    inter_match = re.search(r'\bkWh\s+intermedia\b[^\d\n]*([\d,]+)', text, re.IGNORECASE)
-    punta_match = re.search(r'\bkWh\s+punta\b[^\d\n]*([\d,]+)', text, re.IGNORECASE)
+    # 6. Consumo kWh
+    kwh_val = None
 
-    if base_match or inter_match or punta_match:
-        b = int(base_match.group(1).replace(',', '')) if base_match else 0
-        i = int(inter_match.group(1).replace(',', '')) if inter_match else 0
-        p = int(punta_match.group(1).replace(',', '')) if punta_match else 0
+    # Estrategia 1: Tarifa Horaria GDMTH / GDMTO (kWh base + intermedia + punta)
+    # Allows whitespace (\n, \r, \t, space) and '|' pipe symbols up to 25 chars
+    base_m = re.search(r'kWh\s*base[\s|]{1,25}([\d,]+)', text, re.IGNORECASE)
+    inter_m = re.search(r'kWh\s*intermedia[\s|]{1,25}([\d,]+)', text, re.IGNORECASE)
+    punta_m = re.search(r'kWh\s*punta[\s|]{1,25}([\d,]+)', text, re.IGNORECASE)
+
+    if base_m or inter_m or punta_m:
+        b = int(base_m.group(1).replace(',', '')) if base_m else 0
+        i = int(inter_m.group(1).replace(',', '')) if inter_m else 0
+        p = int(punta_m.group(1).replace(',', '')) if punta_m else 0
         total_gdmth = b + i + p
         if total_gdmth > 0:
-            data["consumo_kwh"] = total_gdmth
+            kwh_val = total_gdmth
 
-    # Fallback para tarifas residenciales o lectura de tabla en página 2
-    if data["consumo_kwh"] is None:
-        history_matches = re.findall(r'(?:ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC)\s*\d{2}\s+\d+\s+([\d,]+)', text, re.IGNORECASE)
-        if history_matches:
-            data["consumo_kwh"] = int(history_matches[-1].replace(',', ''))
-        else:
-            kwh_unit_match = re.search(r'(?:consumo|total|energ[ií]a)?[\s:=]*([\d,]{1,7})\s*kwh\b', text, re.IGNORECASE)
-            if kwh_unit_match:
-                data["consumo_kwh"] = int(kwh_unit_match.group(1).replace(',', ''))
+    # Estrategia 2: Tabla del Historial en Página 2 (ej. ABR 21 \n 11 \n | 1,689)
+    if kwh_val is None:
+        hist_m = re.findall(r'(?:ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC)\s*\d{2}[\s|]+\d+[\s|]+([\d,]+)', text, re.IGNORECASE)
+        if hist_m:
+            kwh_val = int(hist_m[-1].replace(',', ''))
 
+    # Estrategia 3: Recibos residenciales estándar (01 / DAC / PDBT)
+    if kwh_val is None:
+        std_m = re.search(r'(?:Total\s*periodo|Consumo\s*total|Energ[ií]a)[\s|:=]{1,25}([\d,]+)', text, re.IGNORECASE)
+        if std_m:
+            kwh_val = int(std_m.group(1).replace(',', ''))
+
+    data["consumo_kwh"] = kwh_val
     return data
 
 @app.post("/extract")
