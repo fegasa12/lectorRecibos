@@ -18,63 +18,63 @@ app.add_middleware(
 )
 
 
+
 def parse_cfe_text(text: str) -> dict:
-    """Extrae mediante expresiones regulares la información clave del texto."""
     data = {
         "numero_servicio": None,
         "rmu": None,
         "total_a_pagar": None,
         "fecha_limite_pago": None,
         "periodo_facturado": None,
-        "consumo_kwh": None,
+        "consumo_kwh": None
     }
 
     # 1. Número de servicio (RPU - 12 dígitos)
-    service_match = re.search(r"\b\d{12}\b", text)
+    service_match = re.search(r'\b\d{12}\b', text)
     if service_match:
         data["numero_servicio"] = service_match.group(0)
 
     # 2. Total a Pagar
-    total_match = re.search(
-        r"TOTAL\s*A\s*PAGAR[^\d]*([\d,]+\.\d{2})", text, re.IGNORECASE
-    )
+    total_match = re.search(r'TOTAL\s*A\s*PAGAR[^\d]*([\d,]+\.\d{2})', text, re.IGNORECASE)
     if not total_match:
-        total_match = re.search(r"\$\s*([\d,]+\.\d{2})", text)
+        total_match = re.search(r'\$\s*([\d,]+\.\d{2})', text)
     if total_match:
-        data["total_a_pagar"] = float(total_match.group(1).replace(",", ""))
+        data["total_a_pagar"] = float(total_match.group(1).replace(',', ''))
 
     # 3. RMU
-    rmu_match = re.search(
-        r"RMU[:\s]*([0-9A-Z\s\-]{15,35})", text, re.IGNORECASE
-    )
+    rmu_match = re.search(r'RMU[:\s]*([0-9A-Z\s\-]{15,35})', text, re.IGNORECASE)
     if rmu_match:
         data["rmu"] = rmu_match.group(1).strip()
 
     # 4. Fecha Límite de Pago
-    limit_match = re.search(
-        r"(?:LÍMITE|LIMITE)\s*DE\s*PAGO[:\s]*([\d]{2}\s+[A-Z]{3}\s+[\d]{2,4}|\d{2}/\d{2}/\d{4})",
-        text,
-        re.IGNORECASE,
-    )
+    limit_match = re.search(r'(?:LÍMITE|LIMITE)\s*DE\s*PAGO[:\s]*([\d]{2}\s+[A-Z]{3}\s+[\d]{2,4}|\d{2}/\d{2}/\d{4})', text, re.IGNORECASE)
     if limit_match:
         data["fecha_limite_pago"] = limit_match.group(1).strip()
 
     # 5. Periodo Facturado
-    period_match = re.search(
-        r"PERIODO\s*FACTURADO[:\s]*([\d]{2}\s+[A-Z]{3}\s+[\d]{2,4}\s*-\s*[\d]{2}\s+[A-Z]{3}\s+[\d]{2,4})",
-        text,
-        re.IGNORECASE,
-    )
+    period_match = re.search(r'PERIODO\s*FACTURADO[:\s]*([\d]{2}\s+[A-Z]{3}\s+[\d]{2,4}\s*-\s*[\d]{2}\s+[A-Z]{3}\s+[\d]{2,4})', text, re.IGNORECASE)
     if period_match:
         data["periodo_facturado"] = period_match.group(1).strip()
 
-    # 6. Consumo kWh
-    kwh_match = re.search(
-        r"(?:Total\s*periodo|Consumo)[:\s]*(\d+)", text, re.IGNORECASE
-    )
-    if kwh_match:
-        data["consumo_kwh"] = int(kwh_match.group(1))
+    # 6. Consumo kWh (Estrategia Multi-patrón flexible)
+    kwh_val = None
 
+    # Patrón A: "340 kWh" o "340kWh" (Unidad explicita)
+    kwh_unit_match = re.search(r'(?:consumo|total|energ[ií]a)?[\s:=]*(\d{1,6})\s*kwh\b', text, re.IGNORECASE)
+    if kwh_unit_match:
+        kwh_val = int(kwh_unit_match.group(1))
+    else:
+        # Patrón B: "Total periodo 340", "Consumo (kWh): 340", "Energía 340"
+        total_periodo_match = re.search(r'(?:Total\s*periodo|Consumo\s*(?:total)?|Energ[ií]a)(?:\s*\([^)]*\))?[\s:=]*(\d{1,6})', text, re.IGNORECASE)
+        if total_periodo_match:
+            kwh_val = int(total_periodo_match.group(1))
+        else:
+            # Patrón C: "Total periodo" seguido de saltos de línea/espacios y el primer número de 1 a 5 dígitos
+            table_match = re.search(r'Total\s*periodo[\s\S]{0,40}?\b(\d{1,5})\b', text, re.IGNORECASE)
+            if table_match:
+                kwh_val = int(table_match.group(1))
+
+    data["consumo_kwh"] = kwh_val
     return data
 
 
