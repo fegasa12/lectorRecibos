@@ -27,12 +27,12 @@ def parse_cfe_text(text: str) -> dict:
         "consumo_kwh": None
     }
 
-    # 1. No. de servicio (RPU - 12 dígitos)
+    # 1. Número de servicio (RPU - 12 dígitos)
     service_match = re.search(r'\b\d{12}\b', text)
     if service_match:
         data["numero_servicio"] = service_match.group(0)
 
-    # 2. Total a Pagar
+    # 2. Total a Pagar ($5,184)
     total_match = re.search(r'TOTAL\s*A\s*PAGAR[^\d]*([\d,]+(?:\.\d{2})?)', text, re.IGNORECASE)
     if not total_match:
         total_match = re.search(r'\$\s*([\d,]+(?:\.\d{2})?)', text)
@@ -42,7 +42,7 @@ def parse_cfe_text(text: str) -> dict:
     # 3. RMU
     rmu_match = re.search(r'RMU[:\s]*([0-9A-Z\s\-]{15,35})', text, re.IGNORECASE)
     if rmu_match:
-        data["rmu"] = rmu_match.group(1).strip()
+        data["rmu"] = re.sub(r'\s+', ' ', rmu_match.group(1)).strip()
 
     # 4. Fecha Límite de Pago
     limit_match = re.search(r'(?:LÍMITE|LIMITE)\s*DE\s*PAGO[:\s]*([\d]{2}\s+[A-Z]{3}\s+[\d]{2,4}|\d{2}/\d{2}/\d{4})', text, re.IGNORECASE)
@@ -54,44 +54,30 @@ def parse_cfe_text(text: str) -> dict:
     if period_match:
         data["periodo_facturado"] = period_match.group(1).strip()
 
-    # 6. Consumo kWh - Motor Inteligente Multi-Tarifa
-    kwh_val = None
-
-    # ESTRATEGIA A: Tarifa Horaria GDMTH / GDMTO (Suma de kWh base + intermedia + punta)
-    base_match = re.search(r'kWh\s*base[^\d]*([\d,]+)', text, re.IGNORECASE)
-    inter_match = re.search(r'kWh\s*intermedia[^\d]*([\d,]+)', text, re.IGNORECASE)
-    punta_match = re.search(r'kWh\s*punta[^\d]*([\d,]+)', text, re.IGNORECASE)
+    # 6. Consumo kWh - Extracción estricta por renglón sin sangrado multilínea
+    base_match = re.search(r'\bkWh\s+base\b[^\d\n]*([\d,]+)', text, re.IGNORECASE)
+    inter_match = re.search(r'\bkWh\s+intermedia\b[^\d\n]*([\d,]+)', text, re.IGNORECASE)
+    punta_match = re.search(r'\bkWh\s+punta\b[^\d\n]*([\d,]+)', text, re.IGNORECASE)
 
     if base_match or inter_match or punta_match:
-        b_val = int(base_match.group(1).replace(',', '')) if base_match else 0
-        i_val = int(inter_match.group(1).replace(',', '')) if inter_match else 0
-        p_val = int(punta_match.group(1).replace(',', '')) if punta_match else 0
-        total_sum = b_val + i_val + p_val
-        if total_sum > 0:
-            kwh_val = total_sum
+        b = int(base_match.group(1).replace(',', '')) if base_match else 0
+        i = int(inter_match.group(1).replace(',', '')) if inter_match else 0
+        p = int(punta_match.group(1).replace(',', '')) if punta_match else 0
+        total_gdmth = b + i + p
+        if total_gdmth > 0:
+            data["consumo_kwh"] = total_gdmth
 
-    # ESTRATEGIA B: Página 2 - Tabla de Historial ("Consumo total kWh")
-    if kwh_val is None:
-        # Busca filas como: ABR 21  11 | 1,689 |
+    # Fallback para tarifas residenciales o lectura de tabla en página 2
+    if data["consumo_kwh"] is None:
         history_matches = re.findall(r'(?:ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC)\s*\d{2}\s+\d+\s+([\d,]+)', text, re.IGNORECASE)
         if history_matches:
-            last_kWh = history_matches[-1].replace(',', '')
-            if last_kWh.isdigit():
-                kwh_val = int(last_kWh)
-
-    # ESTRATEGIA C: Tarifa Residencial Estándar 01 / DAC / PDBT
-    if kwh_val is None:
-        kwh_unit_match = re.search(r'(?:consumo|total|energ[ií]a)?[\s:=]*([\d,]{1,7})\s*kwh\b', text, re.IGNORECASE)
-        if kwh_unit_match:
-            kwh_val = int(kwh_unit_match.group(1).replace(',', ''))
+            data["consumo_kwh"] = int(history_matches[-1].replace(',', ''))
         else:
-            total_periodo_match = re.search(r'(?:Total\s*periodo|Consumo\s*(?:total)?)(?:\s*\([^)]*\))?[\s:=]*([\d,]{1,7})', text, re.IGNORECASE)
-            if total_periodo_match:
-                kwh_val = int(total_periodo_match.group(1).replace(',', ''))
+            kwh_unit_match = re.search(r'(?:consumo|total|energ[ií]a)?[\s:=]*([\d,]{1,7})\s*kwh\b', text, re.IGNORECASE)
+            if kwh_unit_match:
+                data["consumo_kwh"] = int(kwh_unit_match.group(1).replace(',', ''))
 
-    data["consumo_kwh"] = kwh_val
     return data
-
 
 @app.post("/extract")
 async def extract_cfe(file: UploadFile = File(...)):
