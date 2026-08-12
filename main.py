@@ -54,14 +54,13 @@ def parse_cfe_text(text: str) -> dict:
     if period_match:
         data["periodo_facturado"] = period_match.group(1).strip()
 
-    # 6. Consumo kWh
+    # 6. Consumo kWh (Sin confundir importes en MXN)
     kwh_val = None
 
-    # Estrategia 1: Tarifa Horaria GDMTH / GDMTO (kWh base + intermedia + punta)
-    # Allows whitespace (\n, \r, \t, space) and '|' pipe symbols up to 25 chars
-    base_m = re.search(r'kWh\s*base[\s|]{1,25}([\d,]+)', text, re.IGNORECASE)
-    inter_m = re.search(r'kWh\s*intermedia[\s|]{1,25}([\d,]+)', text, re.IGNORECASE)
-    punta_m = re.search(r'kWh\s*punta[\s|]{1,25}([\d,]+)', text, re.IGNORECASE)
+    # ESTRATEGIA 1: Tarifa Horaria GDMTH / GDMTO (kWh base + intermedia + punta)
+    base_m = re.search(r'kWh\s*base[^\d]{1,30}([\d,]+)', text, re.IGNORECASE)
+    inter_m = re.search(r'kWh\s*intermedia[^\d]{1,30}([\d,]+)', text, re.IGNORECASE)
+    punta_m = re.search(r'kWh\s*punta[^\d]{1,30}([\d,]+)', text, re.IGNORECASE)
 
     if base_m or inter_m or punta_m:
         b = int(base_m.group(1).replace(',', '')) if base_m else 0
@@ -71,15 +70,15 @@ def parse_cfe_text(text: str) -> dict:
         if total_gdmth > 0:
             kwh_val = total_gdmth
 
-    # Estrategia 2: Tabla del Historial en Página 2 (ej. ABR 21 \n 11 \n | 1,689)
+    # ESTRATEGIA 2: Tabla de Histórico de la Página 2 ("Consumo total kWh")
     if kwh_val is None:
-        hist_m = re.findall(r'(?:ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC)\s*\d{2}[\s|]+\d+[\s|]+([\d,]+)', text, re.IGNORECASE)
-        if hist_m:
-            kwh_val = int(hist_m[-1].replace(',', ''))
+        hist_matches = re.findall(r'(?:ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC)\s*\d{2}[^\d]*?\d+[^\d]*?([\d,]+)', text, re.IGNORECASE)
+        if hist_matches:
+            kwh_val = int(hist_matches[-1].replace(',', ''))
 
-    # Estrategia 3: Recibos residenciales estándar (01 / DAC / PDBT)
+    # ESTRATEGIA 3: Tarifa Residencial Estándar (Excluye 'Energía' suelta por ser importe monetario)
     if kwh_val is None:
-        std_m = re.search(r'(?:Total\s*periodo|Consumo\s*total|Energ[ií]a)[\s|:=]{1,25}([\d,]+)', text, re.IGNORECASE)
+        std_m = re.search(r'(?:Total\s*periodo|Consumo\s*total|Energ[ií]a\s*\(kWh\)|Consumo\s*kWh)[^\d]{1,30}([\d,]+)', text, re.IGNORECASE)
         if std_m:
             kwh_val = int(std_m.group(1).replace(',', ''))
 
