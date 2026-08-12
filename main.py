@@ -54,35 +54,36 @@ def parse_cfe_text(text: str) -> dict:
     if period_match:
         data["periodo_facturado"] = period_match.group(1).strip()
 
-    # 6. Consumo kWh (Sin confundir importes en MXN)
-    kwh_val = None
+    # 6. ESTRATEGIA PRINCIPAL: Extraer el último renglón de la tabla histórica (Página 2)
+    # Extrae el valor de "Consumo total kWh" del mes actual (ej. ABR 21 | 11 | 1,689)
+    history_matches = re.findall(
+        r'(?:ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC)\s*\d{2}[\s|]+(?:\d+[\s|]+)?([\d,]+)',
+        text, re.IGNORECASE
+    )
 
-    # ESTRATEGIA 1: Tarifa Horaria GDMTH / GDMTO (kWh base + intermedia + punta)
-    base_m = re.search(r'kWh\s*base[^\d]{1,30}([\d,]+)', text, re.IGNORECASE)
-    inter_m = re.search(r'kWh\s*intermedia[^\d]{1,30}([\d,]+)', text, re.IGNORECASE)
-    punta_m = re.search(r'kWh\s*punta[^\d]{1,30}([\d,]+)', text, re.IGNORECASE)
+    if history_matches:
+        # El último elemento coincide con el consumo facturado del periodo actual
+        data["consumo_kwh"] = int(history_matches[-1].replace(',', ''))
 
-    if base_m or inter_m or punta_m:
-        b = int(base_m.group(1).replace(',', '')) if base_m else 0
-        i = int(inter_m.group(1).replace(',', '')) if inter_m else 0
-        p = int(punta_m.group(1).replace(',', '')) if punta_m else 0
-        total_gdmth = b + i + p
-        if total_gdmth > 0:
-            kwh_val = total_gdmth
+    # FALLBACK 1: Suma manual de tarifas horarias GDMTH (kWh base + intermedia + punta)
+    if data["consumo_kwh"] is None:
+        base_m = re.search(r'kWh\s*base[\s|]+([\d,]+)', text, re.IGNORECASE)
+        inter_m = re.search(r'kWh\s*intermedia[\s|]+([\d,]+)', text, re.IGNORECASE)
+        punta_m = re.search(r'kWh\s*punta[\s|]+([\d,]+)', text, re.IGNORECASE)
 
-    # ESTRATEGIA 2: Tabla de Histórico de la Página 2 ("Consumo total kWh")
-    if kwh_val is None:
-        hist_matches = re.findall(r'(?:ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC)\s*\d{2}[^\d]*?\d+[^\d]*?([\d,]+)', text, re.IGNORECASE)
-        if hist_matches:
-            kwh_val = int(hist_matches[-1].replace(',', ''))
+        if base_m or inter_m or punta_m:
+            b = int(base_m.group(1).replace(',', '')) if base_m else 0
+            i = int(inter_m.group(1).replace(',', '')) if inter_m else 0
+            p = int(punta_m.group(1).replace(',', '')) if punta_m else 0
+            if (b + i + p) > 0:
+                data["consumo_kwh"] = b + i + p
 
-    # ESTRATEGIA 3: Tarifa Residencial Estándar (Excluye 'Energía' suelta por ser importe monetario)
-    if kwh_val is None:
-        std_m = re.search(r'(?:Total\s*periodo|Consumo\s*total|Energ[ií]a\s*\(kWh\)|Consumo\s*kWh)[^\d]{1,30}([\d,]+)', text, re.IGNORECASE)
+    # FALLBACK 2: Recibos residenciales simples (Total periodo kWh)
+    if data["consumo_kwh"] is None:
+        std_m = re.search(r'Total\s*periodo[^\d]*([\d,]+)', text, re.IGNORECASE)
         if std_m:
-            kwh_val = int(std_m.group(1).replace(',', ''))
+            data["consumo_kwh"] = int(std_m.group(1).replace(',', ''))
 
-    data["consumo_kwh"] = kwh_val
     return data
 
 @app.post("/extract")
