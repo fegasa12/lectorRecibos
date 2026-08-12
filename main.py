@@ -90,35 +90,35 @@ def parse_cfe_text(text: str) -> dict:
         "medidor": None
     }
 
-    # No. de Servicio (RPU)[cite: 1]
-    service_match = re.search(r'\b\d{12}\b', text)[cite: 1]
+    # No. de Servicio (RPU)
+    service_match = re.search(r'\b\d{12}\b', text)
     if service_match:
-        data["numero_servicio"] = service_match.group(0)[cite: 1]
+        data["numero_servicio"] = service_match.group(0)
 
-    # Total a Pagar[cite: 1]
-    total_match = re.search(r'TOTAL\s*A\s*PAGAR[^\d]*([\d,]+(?:\.\d{2})?)', text, re.IGNORECASE)[cite: 1]
+    # Total a Pagar
+    total_match = re.search(r'TOTAL\s*A\s*PAGAR[^\d]*([\d,]+(?:\.\d{2})?)', text, re.IGNORECASE)
     if not total_match:
-        total_match = re.search(r'\$\s*([\d,]+(?:\.\d{2})?)', text)[cite: 1]
+        total_match = re.search(r'\$\s*([\d,]+(?:\.\d{2})?)', text)
     if total_match:
         data["total_a_pagar"] = float(total_match.group(1).replace(',', ''))
 
-    # RMU[cite: 1]
-    rmu_match = re.search(r'RMU[:\s]*([0-9A-Z\s\-]{15,35})', text, re.IGNORECASE)[cite: 1]
+    # RMU
+    rmu_match = re.search(r'RMU[:\s]*([0-9A-Z\s\-]{15,35})', text, re.IGNORECASE)
     if rmu_match:
         data["rmu"] = re.sub(r'\s+', ' ', rmu_match.group(1)).strip()
 
-    # Fecha Límite de Pago[cite: 1]
-    limit_match = re.search(r'(?:LÍMITE|LIMITE)\s*DE\s*PAGO[:\s]*([\d]{2}\s+[A-Z]{3}\s+[\d]{2,4}|\d{2}/\d{2}/\d{4})', text, re.IGNORECASE)[cite: 1]
+    # Fecha Límite de Pago
+    limit_match = re.search(r'(?:LÍMITE|LIMITE)\s*DE\s*PAGO[:\s]*([\d]{2}\s+[A-Z]{3}\s+[\d]{2,4}|\d{2}/\d{2}/\d{4})', text, re.IGNORECASE)
     if limit_match:
         data["fecha_limite_pago"] = limit_match.group(1).strip()
 
-    # Periodo Facturado[cite: 1]
-    period_match = re.search(r'PERIODO\s*FACTURADO[:\s]*([\d]{2}\s+[A-Z]{3}\s+[\d]{2,4}\s*-\s*[\d]{2}\s+[A-Z]{3}\s+[\d]{2,4})', text, re.IGNORECASE)[cite: 1]
+    # Periodo Facturado
+    period_match = re.search(r'PERIODO\s*FACTURADO[:\s]*([\d]{2}\s+[A-Z]{3}\s+[\d]{2,4}\s*-\s*[\d]{2}\s+[A-Z]{3}\s+[\d]{2,4})', text, re.IGNORECASE)
     if period_match:
         data["periodo_facturado"] = period_match.group(1).strip()
 
-    # Consumo kWh (Histórico P2 o Suma GDMTH)[cite: 1]
-    history_matches = re.findall(r'(?:ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC)\s*\d{2}[\s|]+(?:\d+[\s|]+)?([\d,]+)', text, re.IGNORECASE)[cite: 1]
+    # Consumo kWh (Histórico P2 o Suma GDMTH)
+    history_matches = re.findall(r'(?:ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC)\s*\d{2}[\s|]+(?:\d+[\s|]+)?([\d,]+)', text, re.IGNORECASE)
     if history_matches:
         data["consumo"] = int(history_matches[-1].replace(',', ''))
     else:
