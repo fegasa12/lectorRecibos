@@ -7,7 +7,7 @@ import fitz  # PyMuPDF
 from PIL import Image
 import pytesseract
 
-app = FastAPI(title="CFE Extractor API", version="1.0.0")
+app = FastAPI(title="CFE Extractor API Multi-Tarifa", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -16,8 +16,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
 
 def parse_cfe_text(text: str) -> dict:
     data = {
@@ -29,15 +27,15 @@ def parse_cfe_text(text: str) -> dict:
         "consumo_kwh": None
     }
 
-    # 1. Número de servicio (RPU - 12 dígitos)
+    # 1. No. de servicio (RPU - 12 dígitos)
     service_match = re.search(r'\b\d{12}\b', text)
     if service_match:
         data["numero_servicio"] = service_match.group(0)
 
     # 2. Total a Pagar
-    total_match = re.search(r'TOTAL\s*A\s*PAGAR[^\d]*([\d,]+\.\d{2})', text, re.IGNORECASE)
+    total_match = re.search(r'TOTAL\s*A\s*PAGAR[^\d]*([\d,]+(?:\.\d{2})?)', text, re.IGNORECASE)
     if not total_match:
-        total_match = re.search(r'\$\s*([\d,]+\.\d{2})', text)
+        total_match = re.search(r'\$\s*([\d,]+(?:\.\d{2})?)', text)
     if total_match:
         data["total_a_pagar"] = float(total_match.group(1).replace(',', ''))
 
@@ -56,23 +54,40 @@ def parse_cfe_text(text: str) -> dict:
     if period_match:
         data["periodo_facturado"] = period_match.group(1).strip()
 
-    # 6. Consumo kWh (Estrategia Multi-patrón flexible)
+    # 6. Consumo kWh - Motor Inteligente Multi-Tarifa
     kwh_val = None
 
-    # Patrón A: "340 kWh" o "340kWh" (Unidad explicita)
-    kwh_unit_match = re.search(r'(?:consumo|total|energ[ií]a)?[\s:=]*(\d{1,6})\s*kwh\b', text, re.IGNORECASE)
-    if kwh_unit_match:
-        kwh_val = int(kwh_unit_match.group(1))
-    else:
-        # Patrón B: "Total periodo 340", "Consumo (kWh): 340", "Energía 340"
-        total_periodo_match = re.search(r'(?:Total\s*periodo|Consumo\s*(?:total)?|Energ[ií]a)(?:\s*\([^)]*\))?[\s:=]*(\d{1,6})', text, re.IGNORECASE)
-        if total_periodo_match:
-            kwh_val = int(total_periodo_match.group(1))
+    # ESTRATEGIA A: Tarifa Horaria GDMTH / GDMTO (Suma de kWh base + intermedia + punta)
+    base_match = re.search(r'kWh\s*base[^\d]*([\d,]+)', text, re.IGNORECASE)
+    inter_match = re.search(r'kWh\s*intermedia[^\d]*([\d,]+)', text, re.IGNORECASE)
+    punta_match = re.search(r'kWh\s*punta[^\d]*([\d,]+)', text, re.IGNORECASE)
+
+    if base_match or inter_match or punta_match:
+        b_val = int(base_match.group(1).replace(',', '')) if base_match else 0
+        i_val = int(inter_match.group(1).replace(',', '')) if inter_match else 0
+        p_val = int(punta_match.group(1).replace(',', '')) if punta_match else 0
+        total_sum = b_val + i_val + p_val
+        if total_sum > 0:
+            kwh_val = total_sum
+
+    # ESTRATEGIA B: Página 2 - Tabla de Historial ("Consumo total kWh")
+    if kwh_val is None:
+        # Busca filas como: ABR 21  11 | 1,689 |
+        history_matches = re.findall(r'(?:ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC)\s*\d{2}\s+\d+\s+([\d,]+)', text, re.IGNORECASE)
+        if history_matches:
+            last_kWh = history_matches[-1].replace(',', '')
+            if last_kWh.isdigit():
+                kwh_val = int(last_kWh)
+
+    # ESTRATEGIA C: Tarifa Residencial Estándar 01 / DAC / PDBT
+    if kwh_val is None:
+        kwh_unit_match = re.search(r'(?:consumo|total|energ[ií]a)?[\s:=]*([\d,]{1,7})\s*kwh\b', text, re.IGNORECASE)
+        if kwh_unit_match:
+            kwh_val = int(kwh_unit_match.group(1).replace(',', ''))
         else:
-            # Patrón C: "Total periodo" seguido de saltos de línea/espacios y el primer número de 1 a 5 dígitos
-            table_match = re.search(r'Total\s*periodo[\s\S]{0,40}?\b(\d{1,5})\b', text, re.IGNORECASE)
-            if table_match:
-                kwh_val = int(table_match.group(1))
+            total_periodo_match = re.search(r'(?:Total\s*periodo|Consumo\s*(?:total)?)(?:\s*\([^)]*\))?[\s:=]*([\d,]{1,7})', text, re.IGNORECASE)
+            if total_periodo_match:
+                kwh_val = int(total_periodo_match.group(1).replace(',', ''))
 
     data["consumo_kwh"] = kwh_val
     return data
@@ -90,27 +105,26 @@ async def extract_cfe(file: UploadFile = File(...)):
     try:
         if file_type == "pdf":
             doc = fitz.open(stream=contents, filetype="pdf")
-            page = doc[0]
+            
+            # EXTRAER TEXTO DE TODAS LAS PÁGINAS DEL PDF (Página 1 + Página 2)
+            pages_text = [page.get_text("text") for page in doc]
+            raw_text = "\n".join(pages_text)
 
-            # Intentar extracción directa de texto nativo
-            raw_text = page.get_text("text")
-
-            # Fallback a OCR si el texto es escaso o es una imagen escaneada
+            # Fallback a OCR si el PDF no contiene texto nativo
             if len(raw_text.strip()) < 50 or "SERVICIO" not in raw_text.upper():
                 source_type = "ocr_fallback"
-                pix = page.get_pixmap(dpi=300)
-                img = Image.open(io.BytesIO(pix.tobytes("png")))
-                raw_text = pytesseract.image_to_string(img, lang="spa")
+                raw_text = ""
+                for page in doc:
+                    pix = page.get_pixmap(dpi=300)
+                    img = Image.open(io.BytesIO(pix.tobytes("png")))
+                    raw_text += "\n" + pytesseract.image_to_string(img, lang="spa")
 
         elif file_type in ["png", "jpg", "jpeg"]:
             source_type = "ocr_fallback"
             img = Image.open(io.BytesIO(contents))
             raw_text = pytesseract.image_to_string(img, lang="spa")
         else:
-            raise HTTPException(
-                status_code=400,
-                detail="Formato no soportado. Envía PDF, PNG o JPG.",
-            )
+            raise HTTPException(status_code=400, detail="Formato no soportado. Envía PDF, PNG o JPG.")
 
         extracted_data = parse_cfe_text(raw_text)
         elapsed_ms = round((time.time() - start_time) * 1000, 2)
@@ -119,10 +133,8 @@ async def extract_cfe(file: UploadFile = File(...)):
             "status": "success",
             "processing_time_ms": elapsed_ms,
             "source": source_type,
-            "data": extracted_data,
+            "data": extracted_data
         }
 
     except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Error al procesar archivo: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Error al procesar archivo: {str(e)}")
