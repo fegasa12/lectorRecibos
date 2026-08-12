@@ -40,37 +40,37 @@ def parse_sadm_text(text: str) -> dict:
         "rmu": None
     }
 
-    # 1. Número de Servicio / N.I.S (ej. 2247852-01)[cite: 2]
+    # 1. Número de Servicio / N.I.S (ej. 2247852-01)
     nis_match = re.search(r'N\.?I\.?S[:\s]*([\d\-]+)', text, re.IGNORECASE)
     if nis_match:
         data["numero_servicio"] = nis_match.group(1).strip()
 
-    # 2. Total a Pagar ($972.00)[cite: 2]
+    # 2. Total a Pagar ($972.00)
     total_match = re.search(r'TOTAL\s*A\s*PAGAR[^\d]*\$?\s*([\d,]+(?:\.\d{2})?)', text, re.IGNORECASE)
     if not total_match:
-        total_match = re.search(r'TOTAL\s*DEL\s*MES[^\d]*([\d,]+(?:\.\d{2})?)', text, re.IGNORECASE)[cite: 2]
+        total_match = re.search(r'TOTAL\s*DEL\s*MES[^\d]*([\d,]+(?:\.\d{2})?)', text, re.IGNORECASE)
     if total_match:
         data["total_a_pagar"] = float(total_match.group(1).replace(',', ''))
 
-    # 3. Fecha Límite de Pago / Vencimiento (28/SEP/2020)[cite: 2]
-    venc_match = re.search(r'VENCIMIENTO[\s|]+(\d{2}/[A-Z]{3}/\d{4}|\d{2}/\d{2}/\d{4})', text, re.IGNORECASE)[cite: 2]
+    # 3. Fecha Límite de Pago / Vencimiento (28/SEP/2020)
+    venc_match = re.search(r'VENCIMIENTO[\s|]+(\d{2}/[A-Z]{3}/\d{4}|\d{2}/\d{2}/\d{4})', text, re.IGNORECASE)
     if venc_match:
         data["fecha_limite_pago"] = venc_match.group(1).strip()
 
-    # 4. Periodo de Consumo (10/AGO/2020 - 08/SEP/2020)[cite: 2]
-    period_match = re.search(r'PERIODO\s*DE\s*CONSUMO[\s|]+(\d{2}/[A-Z]{3}/\d{4}\s*\d{2}/[A-Z]{3}/\d{4}|\d{2}/\d{2}/\d{4}\s*-\s*\d{2}/\d{2}/\d{4})', text, re.IGNORECASE)[cite: 2]
+    # 4. Periodo de Consumo (10/AGO/2020 - 08/SEP/2020)
+    period_match = re.search(r'PERIODO\s*DE\s*CONSUMO[\s|]+(\d{2}/[A-Z]{3}/\d{4}\s*\d{2}/[A-Z]{3}/\d{4}|\d{2}/\d{2}/\d{4}\s*-\s*\d{2}/\d{2}/\d{4})', text, re.IGNORECASE)
     if not period_match:
-        period_match = re.search(r'MES\s*FACTURADO[\s|]+([A-Z]{3}/\d{4})', text, re.IGNORECASE)[cite: 2]
+        period_match = re.search(r'MES\s*FACTURADO[\s|]+([A-Z]{3}/\d{4})', text, re.IGNORECASE)
     if period_match:
         data["periodo_facturado"] = re.sub(r'\s+', ' - ', period_match.group(1).strip())
 
-    # 5. Consumo en m3 (CONSUMO 42)[cite: 2]
-    consumo_match = re.search(r'CONSUMO[\s|]+(\d+)', text, re.IGNORECASE)[cite: 2]
+    # 5. Consumo en m3 (CONSUMO 42)
+    consumo_match = re.search(r'CONSUMO[\s|]+(\d+)', text, re.IGNORECASE)
     if consumo_match:
         data["consumo"] = int(consumo_match.group(1))
 
-    # 6. Número de Medidor (02412438)[cite: 2]
-    medidor_match = re.search(r'MEDIDOR[\s|]+(\d+)', text, re.IGNORECASE)[cite: 2]
+    # 6. Número de Medidor (02412438)
+    medidor_match = re.search(r'MEDIDOR[\s|]+(\d+)', text, re.IGNORECASE)
     if medidor_match:
         data["medidor"] = medidor_match.group(1).strip()
 
